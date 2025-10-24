@@ -1,6 +1,7 @@
 #include "CLI/CLI11.hpp"
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <regex>
 #include <string>
 #include <thread>
@@ -57,29 +58,45 @@ int main(int argc, char** argv)
 {
     CLI::App app("CLI program to play Beep sound.");
 
+    std::unordered_map<CLI::App*, std::function<void(const std::unique_ptr<BeepInterface>&)>> subCommandCallbacks;
+
     std::string backend = "windowsapi";
     unsigned freq = 440;
     unsigned dur = 500;
+
     std::string noteName;
 
-    app.add_option("-b,--backend", backend, "Backend to use for beep sound.")->check(CLI::IsMember({ "windowsapi" }));
+    app.add_option("-b,--backend", backend, "Backend to use for beep sound.");
 
     {
         CLI::App* appF = app.add_subcommand("f", "Play a beep sound with the specified frequency and duration.");
 
         appF->add_option("frequency", freq, "Frequency of the beep sound in Hz. Default is 440 Hz.");
         appF->add_option("duration", dur, "Duration of the beep sound in milliseconds. Default is 500 ms.");
+
+        subCommandCallbacks[appF] = [&](const std::unique_ptr<BeepInterface>& beep) {
+            beep->beep(freq, dur);
+        };
     }
     {
         CLI::App* appN = app.add_subcommand("n", "Play a beep sound with the specified note and duration.");
 
         appN->add_option("note", noteName, "Note to play. Required. Example: C4")->required();
         appN->add_option("duration", dur, "Duration of the beep sound in milliseconds. Default is 500 ms.");
+
+        subCommandCallbacks[appN] = [&](const std::unique_ptr<BeepInterface>& beep) {
+            freq = convertNoteToFreq(noteName);
+            beep->beep(freq, dur);
+        };
     }
     {
         CLI::App* appB = app.add_subcommand("b", "Wait for a specified duration. (break) ");
 
         appB->add_option("duration", dur, "Duration to wait in milliseconds. Default is 500 ms.");
+
+        subCommandCallbacks[appB] = [&](const std::unique_ptr<BeepInterface>&) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(dur));
+        };
     }
 
     app.require_subcommand(1, 1);
@@ -88,13 +105,11 @@ int main(int argc, char** argv)
         app.parse(argc, argv);
         auto beep = BeepInterface::build(backend);
 
-        if (app.get_subcommand("f")->parsed()) {
-            beep->beep(freq, dur);
-        } else if (app.get_subcommand("n")->parsed()) {
-            freq = convertNoteToFreq(noteName);
-            beep->beep(freq, dur);
-        } else if (app.get_subcommand("b")->parsed()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(dur));
+        for (auto& [subCmd, callback] : subCommandCallbacks) {
+            if (subCmd->parsed()) {
+                callback(beep);
+                break;
+            }
         }
     } catch (const CLI::ParseError& e) {
         std::cout << argv[0] << ": error: " << e.get_name() << ": " << e.what() << std::endl;
