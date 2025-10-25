@@ -1,5 +1,9 @@
+// beep
+
+// Copyright (c) 2025 prbegd
+// Distribution under the MIT License. See the accompanying file LICENSE or copy at https://opensource.org/licenses/MIT
+
 #include "CLI/CLI11.hpp"
-#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <memory>
