@@ -1,8 +1,10 @@
 #include "CLI/CLI11.hpp"
+#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -31,7 +33,14 @@ std::unique_ptr<BeepInterface> BeepInterface::build(std::string_view backend)
     }
 }
 
-unsigned convertNoteToFreq(const std::string& note)
+/**
+ * @brief Convert a note name to its corresponding frequency in Hz based on the 12-tone equal temperament (12tet) scale.
+ *
+ * @param note The note name in the format "C4" or "D#3".
+ * @param A4Pitch The pitch of the A note in 4th octave (A4) in Hz.
+ * @return unsigned The frequency of the note in Hz.
+ */
+unsigned noteToFreq_12tet(const std::string& note, double A4Pitch = 440.0)
 {
     static const std::regex noteRegex("([A-G]#?)([0-9]+)");
     static const std::regex noteRegexB("([A-G]b)([0-9]+)");
@@ -46,13 +55,20 @@ unsigned convertNoteToFreq(const std::string& note)
     else if (std::regex_match(note, match, noteRegexB))
         noteName = mapNoteBToNoteC.at(match.str(1));
     else
-        throw std::runtime_error("Invalid note format: " + note);
+        throw std::runtime_error("Invalid note format: What is " + note + '?');
     octave = std::stoi(match.str(2));
 
-    int offsetFromA4 = std::distance(arrNotes.begin(), std::find(arrNotes.begin(), arrNotes.end(), noteName)) - 9;
-    offsetFromA4 += (octave - 4) * 12;
+    const auto *noteIndex = std::find(arrNotes.begin(), arrNotes.end(), noteName);
+    if (noteIndex == arrNotes.end()) 
+        throw std::runtime_error("Invalid note name: There's no such a note as " + noteName + '!');
+    
+    int64_t offsetFromA4 = std::distance(arrNotes.begin(), noteIndex) - 9;
+    offsetFromA4 += static_cast<int64_t>((octave - 4) * 12);
 
-    return static_cast<unsigned>(std::round(440.0 * std::pow(2.0, offsetFromA4 / 12.0)));
+    if (offsetFromA4 > 39) 
+        throw std::runtime_error(std::string("Note is too high: ") += note + ". Max is C8.");
+
+    return static_cast<unsigned>(std::round(A4Pitch * std::pow(2.0, static_cast<double>(offsetFromA4) / 12.0)));
 }
 int main(int argc, char** argv)
 {
@@ -61,17 +77,19 @@ int main(int argc, char** argv)
     std::unordered_map<CLI::App*, std::function<void(const std::unique_ptr<BeepInterface>&)>> subCommandCallbacks;
 
     std::string backend = "windowsapi";
-    unsigned freq = 440;
+    unsigned freq = 0;
     unsigned dur = 500;
 
     std::string noteName;
+    double A4Pitch = 440.0;
 
     app.add_option("-b,--backend", backend, "Backend to use for beep sound.");
+    app.set_help_flag("-h,--help", "Show this help message and exit. You can also use this on subcommands.");
 
     {
         CLI::App* appF = app.add_subcommand("f", "Play a beep sound with the specified frequency and duration.");
 
-        appF->add_option("frequency", freq, "Frequency of the beep sound in Hz. Default is 440 Hz.");
+        appF->add_option("frequency", freq, "Frequency of the beep sound in Hz.")->required();
         appF->add_option("duration", dur, "Duration of the beep sound in milliseconds. Default is 500 ms.");
 
         subCommandCallbacks[appF] = [&](const std::unique_ptr<BeepInterface>& beep) {
@@ -81,11 +99,12 @@ int main(int argc, char** argv)
     {
         CLI::App* appN = app.add_subcommand("n", "Play a beep sound with the specified note and duration.");
 
-        appN->add_option("note", noteName, "Note to play. Required. Example: C4")->required();
+        appN->add_option("note", noteName, "Note to play. e.g. C4")->required();
         appN->add_option("duration", dur, "Duration of the beep sound in milliseconds. Default is 500 ms.");
+        appN->add_option("-a,--A4Pitch", A4Pitch, "Pitch of the A note in 4th octave (A4) in Hz. This pitch is used as the standard pitch for calculating note pitches. Default is 440.0 Hz.");
 
         subCommandCallbacks[appN] = [&](const std::unique_ptr<BeepInterface>& beep) {
-            freq = convertNoteToFreq(noteName);
+            freq = noteToFreq_12tet(noteName, A4Pitch);
             beep->beep(freq, dur);
         };
     }
@@ -99,7 +118,7 @@ int main(int argc, char** argv)
         };
     }
 
-    app.require_subcommand(1, 1);
+    app.require_subcommand(0, 1);
 
     try {
         app.parse(argc, argv);
@@ -108,9 +127,20 @@ int main(int argc, char** argv)
         for (auto& [subCmd, callback] : subCommandCallbacks) {
             if (subCmd->parsed()) {
                 callback(beep);
-                break;
+                return 0;
             }
         }
+
+        throw std::logic_error("No subcommands provided. Use -h or --help for usage information.");
+    } catch (const CLI::CallForHelp&) {
+        for (const auto& subcmd : app.get_subcommands()) {
+            if (subcmd->parsed()) {
+                std::cout << subcmd->help() << '\n';
+                return 0;
+            }
+        }
+        std::cout << app.help() << '\n';
+        return 0;
     } catch (const CLI::ParseError& e) {
         std::cout << argv[0] << ": error: " << e.get_name() << ": " << e.what() << std::endl;
         return 2;
