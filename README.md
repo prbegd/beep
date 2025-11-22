@@ -12,23 +12,9 @@ Because we currently use Windows API to play beep sound, So it can only be built
 Run `./beep -h` to see help message.
 
 ## Example
-A simple song Twinkle Twinkle Little Star
+A simple song Twinkle Twinkle Little Star *with just a single line of command!*
 ```
-./beep n C4
-./beep n C4
-./beep n G4
-./beep n G4
-./beep n A4
-./beep n A4
-./beep n G4
-./beep b
-./beep n F4
-./beep n F4
-./beep n E4
-./beep n E4
-./beep n D4
-./beep n D4
-./beep n C4
+beep s "C4;C4;G4;G4;A4;A4;G4,750;-,250;F4;F4;E4;E4;D4;D4;C4,750"
 ```
 
 ## Other
