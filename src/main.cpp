@@ -4,6 +4,7 @@
 // Distribution under the MIT License. See the accompanying file LICENSE or copy at https://opensource.org/licenses/MIT
 
 #include "CLI/CLI11.hpp"
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <exception>
@@ -127,6 +128,7 @@ int main(int argc, char** argv)
 Format: '<note_name>[,duration][;note_name[,duration]...]'
 note_name: Note name in the format:' <A-G>[#|b]<octave>' e.g. C4, D#3, Gb2. Can also be: 'break', '-', which pause the sound for the specified duration.
 duration: Duration of the beep sound in milliseconds. INT64 value, default: 500 (ms).
+Will ignore spaces. New lines are treated as semicolons.
 
 Example: C4;E4;G4;C5,1000)")
             ->required();
@@ -134,6 +136,9 @@ Example: C4;E4;G4;C5,1000)")
             ->default_val(440.0);
 
         subCommandCallbacks[appS] = [&](const std::unique_ptr<BeepInterface>& beep) {
+            score = CLI::ignore_space(score);
+            std::replace(score.begin(), score.end(), '\n', ';');
+
             auto scoreSplit = CLI::detail::split(score, ';');
             for (const auto& fullNote : scoreSplit) {
                 auto fullNoteSplit = CLI::detail::split(fullNote, ',');

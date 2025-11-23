@@ -60,6 +60,7 @@ POSITIONALS:
                               the specified duration.
                               duration: Duration of the beep sound in milliseconds. INT64
                               value, default: 500 (ms).
+                              Will ignore spaces. New lines are treated as semicolons.
 
                               Example: C4;E4;G4;C5,1000
 
