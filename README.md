@@ -14,7 +14,7 @@ Run `./beep -h` to see help message.
 ## Example
 A simple song Twinkle Twinkle Little Star *with just a single line of command!*
 ```
-beep s "C4;C4;G4;G4;A4;A4;G4,750;-,250;F4;F4;E4;E4;D4;D4;C4,750"
+./beep s "C4;C4;G4;G4;A4;A4;G4,750;-,250;F4;F4;E4;E4;D4;D4;C4,750"
 ```
 
 ## Other

@@ -49,8 +49,10 @@ std::unique_ptr<BeepInterface> BeepInterface::build(std::string_view backend)
  *
  * @param note The note name in the format "C4" or "D#3".
  * @param A4Pitch The pitch of the A note in 4th octave (A4) in Hz.
+ * @tparam AllowHighNotes If true, allows notes higher than C8.
  * @return The frequency of the note in Hz.
  */
+template <bool AllowHighNotes = false>
 double noteToFreq_12tet(std::string note, double A4Pitch = 440.0)
 {
     static const std::regex noteRegex("([A-G]#?)([0-9]+)");
@@ -58,16 +60,23 @@ double noteToFreq_12tet(std::string note, double A4Pitch = 440.0)
     static const std::unordered_map<std::string, std::string> mapNoteBToNoteC { { "Db", "C#" }, { "Eb", "D#" }, { "Gb", "F#" }, { "Ab", "G#" }, { "Bb", "A#" } };
     static const std::array<std::string, 12> arrNotes { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
-    std::transform(note.begin(), note.end(), note.begin(), toupper);
+    note[0] = static_cast<char>(std::toupper(note[0]));
     std::smatch match;
     std::string noteName;
     int64_t octave = 0;
-    if (std::regex_match(note, match, noteRegex))
+    if (std::regex_match(note, match, noteRegex)) {
         noteName = match.str(1);
-    else if (std::regex_match(note, match, noteRegexB))
-        noteName = mapNoteBToNoteC.at(match.str(1));
-    else
+    } else if (std::regex_match(note, match, noteRegexB)) {
+        try {
+            noteName = mapNoteBToNoteC.at(match.str(1));
+        } catch (const std::out_of_range&) {
+            throw std::runtime_error("Invalid note name: There's no such a note as " + match.str(1) + '!');
+        }
+    } else {
+        if (!std::isdigit(note[note.size() - 1]))
+            throw std::runtime_error("Invalid note format: I guess you missed the octave in " + note + '!');
         throw std::runtime_error("Invalid note format: What is " + note + '?');
+    }
     octave = std::stoll(match.str(2));
 
     const auto* noteIndex = std::find(arrNotes.begin(), arrNotes.end(), noteName);
@@ -77,8 +86,9 @@ double noteToFreq_12tet(std::string note, double A4Pitch = 440.0)
     int64_t offsetFromA4 = std::distance(arrNotes.begin(), noteIndex) - 9;
     offsetFromA4 += (octave - 4LL) * 12;
 
-    if (offsetFromA4 > 39)
-        throw std::runtime_error(std::string("Note is too high: ") += note + ". Max is C8.");
+    if constexpr (!AllowHighNotes)
+        if (offsetFromA4 > 39)
+            throw std::runtime_error(std::string("Note is too high: ") += note + ". Max is C8.");
 
     return A4Pitch * std::pow(2.0, static_cast<double>(offsetFromA4) / 12.0);
 }
@@ -100,7 +110,8 @@ int main(int argc, char** argv)
         int64_t dur = 500;
 
         appF->add_option("frequency", freq, "Frequency of the beep sound in Hz.")->required();
-        appF->add_option("duration", dur, "Duration of the beep sound in milliseconds. Default is 500 ms.");
+        appF->add_option("duration", dur, "Duration of the beep sound in milliseconds.")
+            ->default_val(500);
 
         subCommandCallbacks[appF] = [&](const std::unique_ptr<BeepInterface>& beep) {
             beep->beep({ freq, std::chrono::milliseconds(dur) });
@@ -112,14 +123,15 @@ int main(int argc, char** argv)
         std::string score;
         double A4Pitch = 440.0;
 
-        appS->add_option("notes", score, R"(List of notes to play. 
+        appS->add_option("score", score, R"(Music score to play. 
 Format: '<note_name>[,duration][;note_name[,duration]...]'
 note_name: Note name in the format:' <A-G>[#|b]<octave>' e.g. C4, D#3, Gb2. Can also be: 'break', '-', which pause the sound for the specified duration.
 duration: Duration of the beep sound in milliseconds. INT64 value, default: 500 (ms).
 
 Example: C4;E4;G4;C5,1000)")
             ->required();
-        appS->add_option("-a,--A4Pitch", A4Pitch, "Pitch of the A note in 4th octave (A4) in Hz. This pitch is used as the standard pitch for calculating note pitches. Default is 440.0 Hz.");
+        appS->add_option("-a,--A4Pitch", A4Pitch, "Pitch of the A note in 4th octave (A4) in Hz. This pitch is used as the standard pitch for calculating note pitches.")
+            ->default_val(440.0);
 
         subCommandCallbacks[appS] = [&](const std::unique_ptr<BeepInterface>& beep) {
             auto scoreSplit = CLI::detail::split(score, ';');
@@ -142,14 +154,22 @@ Example: C4;E4;G4;C5,1000)")
         };
     }
     {
-        CLI::App* appB = app.add_subcommand("b", "Wait for a specified duration. (break) ");
+        CLI::App* appC = app.add_subcommand("c", "Compute the frequency of a note in Hz.");
 
-        int64_t dur = 500;
+        std::string note;
+        std::string computeMethod = "12tet";
+        double A4Pitch = 440.0;
 
-        appB->add_option("duration", dur, "Duration to wait in milliseconds. Default is 500 ms.");
+        appC->add_option("note", note, R"(Note name in the format: '<A-G>[#|b]<octave>' e.g. C4, D#3, Gb2.)")->required();
+        appC->add_option("method", computeMethod, "Method to use for computing the frequency. Only 12 tone equal temperament (12tet) is supported currently.")
+            ->default_val("12tet")
+            ->check(CLI::IsMember({ "12tet" }));
+        appC->add_option("-a,--A4Pitch", A4Pitch, "Pitch of the A note in 4th octave (A4) in Hz. This pitch is used as the standard pitch for calculating note pitches.")
+            ->default_val(440.0);
 
-        subCommandCallbacks[appB] = [&](const std::unique_ptr<BeepInterface>&) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(dur));
+        subCommandCallbacks[appC] = [&](const std::unique_ptr<BeepInterface>&) {
+            double freq = noteToFreq_12tet<true>(note, A4Pitch);
+            std::cout << std::format("{} = {} Hz\n", note, freq);
         };
     }
 
